@@ -1,0 +1,6 @@
+Name of Quantlet: 'Quantinar-Staking-Simulation'
+Published in: 'Quantinar - A p2p Blockchain Platform for honest scientific Research'
+Description: 'Simulation for Peer Review through Proof-of-Stake'
+Keywords: Quantinar, p2p, peer review, proof-of-stake, POS, proof of stake
+Author: Raul Bag, Bruno Spilak, Julian Winkel
+Submitted: 20221018
