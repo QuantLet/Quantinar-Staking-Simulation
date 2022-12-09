@@ -63,7 +63,7 @@ class PeerReviewSim():
             diffsum += np.sum(np.abs(xi - x[i:]))
         return diffsum / (len(x)**2 * np.mean(x))
 
-    def vote(self, max_bet_share, balance_losses):
+    def vote(self, max_bet_share, balance_losses, proposer_init_contribution = 1):
         """
         @max_bet_share, float in [0,1], determines share of stake which can
         be placed in an individual bet. Upper bound of uniform distribution.
@@ -73,21 +73,38 @@ class PeerReviewSim():
         @balance_losses True | False
         """
 
+        # Randomly select one to be the paper proposer 
+        # This one must have a balance larger than the proposer_init_contribution
+        # So find minimum balance in all 
+        eligible_paper_proposers = [k for k, v in self.stakes.items() if v >= proposer_init_contribution]
+        
+        # Draw one proposer with under a uniform distribution
+        proposer_key = np.random.randint(0, len(eligible_paper_proposers) - 1, 1)[0]
+
         # Draw Bernoulli distribution and weigh with uniformly distributed bet size
         binomial_sample = np.random.binomial(1, self.acceptancte_probability, self.n_stakers)
 
+        # Collect Output
         acceptance_indiv = []
-        for key in self.votes.keys():
-            # Determine bet size
-            current_stake = self.stakes[key]
-            bet_sample = max(np.random.uniform(0, max_bet_share, 1) * current_stake, 0)
-            #print('Current bet size vs stake ', bet_sample, ' --- ', current_stake)
-            #pdb.set_trace()
 
-            if binomial_sample[key] > 0:
-                self.votes[key] = int(1) * bet_sample
+        # All except the paper proposer
+        #bet_keys = [k for k in self.votes.keys() if not k == proposer_key]
+        for key in self.votes.keys():
+
+            # Set proposer's vote to 0. His stake is adjusted before the other's adj. 
+            if key == proposer_key:
+                self.votes[key] = 0
+            
             else:
-                self.votes[key] = int(-1) * bet_sample
+                # Determine bet size
+                current_stake = self.stakes[key]
+                bet_sample = max(np.random.uniform(0, max_bet_share, 1) * current_stake, 0)
+                #print('Current bet size vs stake ', bet_sample, ' --- ', current_stake)
+
+                if binomial_sample[key] > 0:
+                    self.votes[key] = int(1) * bet_sample
+                else:
+                    self.votes[key] = int(-1) * bet_sample
 
             acceptance_indiv.append(self.votes[key])
 
@@ -123,15 +140,26 @@ class PeerReviewSim():
         else:
             to_be_distributed = sum_loser_stakes
 
+        # Add proposer's initial contribution to the pool
+        to_be_distributed = to_be_distributed + proposer_init_contribution
+
         # Adjust Stakes according to Bets and Votes
         new_stakes = copy.deepcopy(self.stakes)
+
+        # Account for proposers initial contribution
+        new_stakes[proposer_key] = new_stakes[proposer_key] - proposer_init_contribution
+
+        # Account for all others
         for key in new_stakes.keys():
-            #pdb.set_trace()
+
             if np.sign(self.votes[key]) == np.sign(won_vote):
                 #print('Updating Stake: ', self.stakes[key])
                 new_stakes[key] += float(abs(acceptance_indiv[key] / sum_winner_stakes) * to_be_distributed)
                 new_stakes[key] += self.inflation_per_iteration
                 #print('Updated Stake: ', new_stakes[key])
+            elif np.sign(self.votes[key]) == 0:
+                #print('This one proposed the paper')
+                pass
             else:
                 new_stakes[key] -= float((abs(acceptance_indiv[key] / sum_loser_stakes) * to_be_distributed))
                 new_stakes[key] += self.inflation_per_iteration
@@ -163,7 +191,7 @@ class PeerReviewSim():
 
         for npart in df['n_participants'].unique():
             print('Evaluation participants sim: ', npart)
-            #pdb.set_trace()
+            
             # Process Filename
             sub = grpd.get_group(npart).dropna(axis = 1).drop(columns = {'n_participants', 'fname', 'decomp_fname', 'Unnamed: 0'}) #.describe())#.mean(axis = 0))
             
@@ -180,41 +208,24 @@ class PeerReviewSim():
 
             # Retrieve decomposed filename
             decomp_fnames = df.loc[sub.index][['decomp_fname']]
-
-            #out_df = pd.DataFrame({'decomp_fnames': decomp_fnames, 'rets': rets_per_round, 'std' : std_per_round, 'sharperatio': sharpe_ratio})
-
             out_df = pd.concat([decomp_fnames, rets_per_round, std_per_round, sharpe_ratio], ignore_index = True, axis = 1)#.reset_index()
             out_df = out_df.rename(columns = {0:'decomp_fnames', 1:'rets', 2:'std', 3:'sharperatio'}).reset_index(drop = True)
 
             # Save Boxplot
             fix, ax = plt.subplots()
-            #ax = out_df.boxplot(column = 'sharperatio', return_type = 'axes')
             plt.boxplot(out_df['sharperatio'])
+
             # Constant y-Axis
             ax.set_ylim(-0.5, 1.5)
             ax.set_xlabel('')
             ax.set_xticks([])
-            #x_axis = ax.get_xaxis()
-            #x_axis.set_label_text('foo')
-            #pdb.set_trace()
-            #plt.suptitle('')
-            #ax.set_xlabel('')
-
-            # No x-Axis label
-            #ax1 = plt.axes()
-            #x_axis = ax1.axes.get_xaxis()
-            #x_axis.set_label('')
-            #x_label = x_axis.get_label()
-            #x_label.set_visible(False)
-            #pdb.set_trace()
-            #plt.show()
             plt.savefig('boxplot_' + str(distr) + '_nparticipants=' + str(npart) + '.png')
             
             out_dfs.append(out_df)
             del out_df
 
         out_all = pd.concat(out_dfs, ignore_index = True)
-        #pdb.set_trace()
+        
         for i in out_all.index:
             distribution, n_stakers, paper_acceptance_probability, inflation_per_iteration, n_rounds, simulation_iteration = out_all.loc[i]['decomp_fnames']
             out_all.loc[i, 'distribution'] = distribution
@@ -234,10 +245,11 @@ class PeerReviewSim():
         fix, ax = plt.subplot()
         #ax = out_df.boxplot(column = 'sharperatio', return_type = 'axes')
         unique_grps = df[col].unique()
-        pdb.set_trace()
+        
         for grp in unique_grps:
             sub = grpd.get_group(grp).dropna(axis = 1) 
             plt.boxplot(sub['sharperatio'])
+            
         # Constant y-Axis
         ax.set_ylim(-1.5, 1.5)
         ax.set_xlabel('')
@@ -441,7 +453,7 @@ if __name__ == '__main__':
 
     # Output Subdirectory
     simulation_dir = 'prod'
-
+    
     for sim_number in range(n_simulations):
         for params in zip(n_rounds, n_stakers, distributions):
             
@@ -458,9 +470,9 @@ if __name__ == '__main__':
                 n_rounds = curr_rounds,
                 out_dir = str('sim/out/' + simulation_dir + '/') + str(sim_number) + '/')
 
-            
+    
     PRS.analyze_output(tgt_str ='stake_growth.csv', out_dir = 'sim/out/' + simulation_dir + '/')
-
+    
     # Boxplots and Descriptive Statistics from saved Output
     PRS.combine_boxplots()
 
